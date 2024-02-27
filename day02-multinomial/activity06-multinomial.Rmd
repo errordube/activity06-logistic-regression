@@ -52,15 +52,50 @@ Now...
   - `select` only the variables listed above to want to make viewing/managing the data (and the `augment` output later) easier.
 - Give your R code chunk a meaningful name, then run your code chunk or knit your document.
 
+
+```{r load-packages}
+library(tidyverse)
+library(tidymodels)
+```
+
+```{r load-data}
+nonvoters <- read_csv("~/STA 631/Activities/activity06-logistic-regression/day02-multinomial/data/nonvoters.csv")
+nonvoters <- nonvoters %>% select(ppage, educ, race, gender, income_cat, Q30, voter_category)
+nonvoters
+```
+
+
 After doing this, answer the following questions:
 
 1. Why do you think the authors chose to only include data from people who were eligible to vote for at least four election cycles?
 
+Answer: To ensure a comprehensive analysis of voting patterns over time, allowing for a clearer distinction. This criterion facilitates a deeper understanding of long-term voting behavior, minimizes the influence of first-time voter biases, and captures changes in political engagement as individuals experience different life stages and solidify their political beliefs.
 
 2. In the FiveThirtyEight article, the authors include visualizations of the relationship between the [voter category and demographic variables](https://projects.fivethirtyeight.com/non-voters-poll-2020-election/images/NONVOTERS-1026-1.png?v=411f25ea).
   Select two of these demographic variables.
   Then, for each variable, create and interpret a plot to describe its relationship with `voter_category`.
 
+```{r Plot for Education and Voter Category}
+ggplot(nonvoters, aes(x = educ, fill = voter_category)) +
+  geom_bar(position = position_fill(), stat = "count") +
+  scale_fill_brewer(palette = "Pastel1") +
+  labs(title = "Education Level by Voter Category",
+       x = "Education Level",
+       y = "Proportion") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.title = element_blank())
+```
+
+```{r Plot for Race and Voter Category}
+ggplot(nonvoters, aes(x = race, fill = voter_category)) +
+  geom_bar(position = position_fill(), stat = "count") +
+  scale_fill_brewer(palette = "Pastel2") +
+  labs(title = "Race by Voter Category",
+       x = "Race",
+       y = "Proportion") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.title = element_blank())
+```
 
 
 We need to do some data preparation before we fit our multinomial logistic regression model.
@@ -73,6 +108,27 @@ We need to do some data preparation before we fit our multinomial logistic regre
 - Then, run your code chunk or knit your document.
   Check that your changes are correct by creating a stacked bar graph using your new `Q30` variable as the $y$-axis and the `voter_category` represented with different colors.
   **Challenge**: Can you use the same color palette (*hint*: this is a handy tool, https://pickcoloronline.com/) that $\texttt{FiveThirthyEight}$ used in their article?
+
+```{r data preparation}
+nonvoters <- nonvoters %>%
+  mutate(party = case_when(
+    Q30 == 1 ~ "Republican",
+    Q30 == 2 ~ "Democrat",
+    Q30 == 3 ~ "Independent",
+    Q30 == 4 | Q30 == 5 | Q30 == -1 ~ "Other"  # Combining 'Other', 'No preference', and 'No response'
+  ))
+
+nonvoters <- nonvoters %>%
+  mutate(voter_category = factor(voter_category, levels = c("rarely/never", "sporadic", "always")))
+
+ggplot(nonvoters, aes(x = party, fill = voter_category)) +
+  geom_bar(position = "fill") +
+  scale_fill_manual(values = c("rarely/never" = "#FF5733", "sporadic" = "#CBDF05", "always" = "#23DF05")) + 
+  labs(y = "Proportion", x = "Party", fill = "Voter Category") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
 
 ## Fitting the model
 
@@ -139,11 +195,13 @@ This is using `{tidymodels}`.
 - In the code chunk below, replace "verbatim" with "r", 
 - Provide the code chunk a meaningful name/title, then run it.
   
-```{verbatim}
+```{r multinomial logistic regression model}
 # abbreviated recipe from previous activities
 multi_mod <- multinom_reg() %>% 
   set_engine("nnet") %>% 
   fit(voter_category ~ ppage + educ + race + gender + income_cat, data = nonvoters)
+
+multi_mod <- repair_call(multi_mod, data = nonvoters)
 
 tidy(multi_mod) %>% 
   print(n = Inf) # This will display all rows of the tibble
@@ -181,12 +239,16 @@ Using your `tidy(multi_mod) %>% print(n = Inf)` output, complete the following i
 
 $$
 \begin{equation*}
-\log\left(\frac{\hat{p}_{\texttt{"always"}}}{\hat{p}_{\texttt{"rarely/never"}}}\right) = \cdots
+\log\left(\frac{\hat{p}_{\texttt{"always"}}}{\hat{p}_{\texttt{"rarely/never"}}}\right) = -1.8538234 + 0.0605977 \times \text{ppage} - 1.3530192 \times \text{I(educ = "High school or less")} - 0.4119994 \times \text{I(educ = "Some college")} - 0.4172005 \times \text{I(race = "Hispanic")} - 0.6827372 \times \text{I(race = "Other/Mixed")} + 0.0392386 \times \text{I(gender = "Male")} - 0.2105851 \times \text{I(income_cat = "$40-75k")} + 0.1466083 \times \text{I(income_cat = "$75-125k")} - 0.7563449 \times \text{I(income_cat = "Less than $40k")}
 \end{equation*}
 $$
 
 4. For your equation in (3), interpret the slope for `genderMale` in both log-odds and odds.
 
+Answer: For males, the log-odds of always voting versus rarely/never voting decreases by 0.2105850553 compared to females, holding all other variables constant.
+
+Odds_ratio= exp(−0.2105850553) = 0.810
+ 
 
 **Note**: The interpretation for the slope for `ppage` is a little more difficult to interpret.
 However, we could mean-center age (i.e., subtract the mean age from each age value) to have a more meaningful interpretation.
@@ -216,7 +278,7 @@ However, we will let R do these calculations.
 - In the code chunk below, replace "verbatim" with "r", 
 - Provide the code chunk a meaningful name/title, then run it.
   
-```{verbatim}
+```{r prediciton}
 voter_aug <- augment(multi_mod, new_data = nonvoters)
 
 voter_aug
@@ -231,7 +293,7 @@ This is still rather difficult to view so a [confusion matrix](https://en.wikipe
 - In the code chunk below, replace "verbatim" with "r", 
 - Provide the code chunk a meaningful name/title, then run it.
   
-```{verbatim}
+```{r confusion-matrix}
 voter_conf_mat <- voter_aug %>% 
   count(voter_category, .pred_class, .drop = FALSE)
 
@@ -247,8 +309,8 @@ We can also visualize how well these predictions fit the original values.
 - In the code chunk below, replace "verbatim" with "r", 
 - Provide the code chunk a meaningful name/title, then run it.
   
-```{verbatim}
-voters %>% 
+```{r visualization of predicted vs self-reported}
+nonvoters %>% 
   ggplot(aes(x = voter_category)) +
   geom_bar() +
   labs(
@@ -267,7 +329,7 @@ Answer the following question:
 
 5. What do you notice?
 
-
+Answer:The first plot shows a bar chart with voter counts for rarely/never, sporadic, and always voters, indicating the majority are sporadic. The second plot is a stacked bar chart, breaking down the accuracy of voter behavior predictions within each actual voting category. It highlights that predictions for rarely/never and always voters are relatively accurate, while predictions for sporadic voters show more variation and error, suggesting the unpredictability of this group's voting behavior.
 
 ## Challenge: Explore with `party`
 
